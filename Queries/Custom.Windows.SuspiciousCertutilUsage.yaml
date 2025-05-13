@@ -1,0 +1,12 @@
+name: Custom.Windows.SuspiciousCertutilUsage
+type: CLIENT
+description: |
+  Identifies potential abuse of certutil for downloading or decoding files.
+parameters: []
+sources:
+  - query: |
+      SELECT * FROM Artifact.Windows.Sysmon.ProcessCreate
+      WHERE Image =~ 'certutil.exe' AND
+            (CommandLine =~ '-decode' OR
+             CommandLine =~ '-urlcache' OR
+             CommandLine =~ 'http')

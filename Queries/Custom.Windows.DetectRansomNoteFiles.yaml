@@ -1,0 +1,23 @@
+name: Custom.Windows.DetectRansomNoteFiles
+type: CLIENT
+description: |
+  Searches user folders for known ransomware ransom note filenames.
+parameters:
+  - name: paths
+    description: Directories to scan (default is C:\Users)
+    default:
+      - 'C:\\Users'
+  - name: patterns
+    description: Filename patterns to look for
+    default:
+      - '*README*.txt'
+      - '*ATTENTION*.txt'
+      - '*DECRYPT*.html'
+      - '*HOW_TO_RECOVER*.txt'
+
+sources:
+  - query: |
+      LET found_notes = foreach paths as path {
+        SELECT * FROM glob(path=path + "\\**", pat=patterns)
+      }
+      SELECT path, size, access_time, modify_time FROM found_notes

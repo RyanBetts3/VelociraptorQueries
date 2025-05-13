@@ -1,0 +1,10 @@
+name: Custom.Windows.MonitorLSASSAccess
+type: CLIENT
+description: |
+  Detects Event ID 10 indicating LSASS access via WMI or suspicious processes.
+parameters: []
+sources:
+  - query: |
+      SELECT EventID, TimeCreated, Message, EventRecordID
+      FROM source('Evtx', 'C:\\Windows\\System32\\winevt\\Logs\\Microsoft-Windows-WMI-Activity%4Operational.evtx')
+      WHERE EventID = 10 AND Message =~ 'lsass.exe'
