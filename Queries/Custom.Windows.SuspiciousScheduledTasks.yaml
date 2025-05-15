@@ -1,0 +1,47 @@
+name: Custom.Windows.SuspiciousScheduledTasks
+type: CLIENT
+description: |
+  Detects potentially malicious or unauthorized scheduled tasks by identifying:
+  - Tasks with suspicious executable paths (AppData, TEMP, etc.)
+  - Tasks created by unusual or unknown authors
+  - Tasks with base64-encoded PowerShell commands or obfuscated cmd usage
+
+parameters:
+  - name: suspicious_paths
+    description: Suspicious directories used by malware
+    default:
+      - 'C:\\Users\\'
+      - 'C:\\ProgramData\\'
+      - 'C:\\Temp\\'
+      - 'C:\\Windows\\Temp\\'
+  - name: suspicious_strings
+    description: Known indicators in command lines
+    default:
+      - 'powershell -enc'
+      - 'cmd /c'
+      - 'certutil'
+      - 'regsvr32'
+      - 'schtasks /create'
+      - '.bat'
+      - '.vbs'
+
+sources:
+  - query: |
+      LET raw_tasks = SELECT FullPath, contents 
+                      FROM glob(glob="C:\\Windows\\System32\\Tasks\\**")
+
+      LET parsed_tasks = foreach raw_tasks as task {
+        SELECT
+          task.FullPath,
+          regex_search("Author>(.*?)</Author", task.contents) AS Author,
+          regex_search("Command>(.*?)</Command", task.contents) AS Command
+      }
+
+      LET suspicious = foreach parsed_tasks as t {
+        WHERE t.Command =~ suspicious_strings OR
+              t.Command =~ suspicious_paths OR
+              t.Author =~ "unknown"
+        SELECT * FROM t
+      }
+
+      SELECT * FROM suspicious

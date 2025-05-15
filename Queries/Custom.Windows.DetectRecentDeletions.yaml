@@ -1,0 +1,67 @@
+name: Custom.Windows.DetectRecentDeletions
+type: CLIENT
+description: |
+  Correlate evidence of recently deleted files using:
+    - USN Journal entries
+    - Recycle Bin contents
+    - NTFS metadata (MFT)
+    - Shellbags (folder deletion)
+    - RecentFiles, UserAssist, and LNK references
+
+  Ideal for DFIR use cases like:
+    - Suspected insider file tampering
+    - Post-ransomware triage
+    - Tracking exfiltration + cleanup attempts
+
+parameters:
+  - name: lookback_days
+    type: int
+    description: Number of days back to search
+    default: 3
+
+sources:
+
+  - name: USN_Deletes
+    query: |
+      SELECT *
+      FROM Artifact.Windows.NTFS.Usn
+      WHERE Reason =~ 'DELETE' AND
+            Timestamp > now() - (lookback_days * 86400)
+
+  - name: RecycleBin
+    query: |
+      SELECT *
+      FROM Artifact.Windows.Recents.RecycleBin
+      WHERE Deleted > now() - (lookback_days * 86400)
+
+  - name: ShellbagDeletedFolders
+    query: |
+      SELECT *
+      FROM Artifact.Windows.Shell.ShellBags
+      WHERE LastModified > now() - (lookback_days * 86400) AND
+            Deleted = true
+
+  - name: DeletedMFTEntries
+    query: |
+      SELECT *
+      FROM Artifact.Windows.NTFS.MFT
+      WHERE IsDeleted = true AND
+            ChangeTime > now() - (lookback_days * 86400)
+
+  - name: RecentFileReferences
+    query: |
+      SELECT *
+      FROM Artifact.Windows.Shell.RecentFiles
+      WHERE LastModified > now() - (lookback_days * 86400)
+
+  - name: UserAssistTraces
+    query: |
+      SELECT *
+      FROM Artifact.Windows.Shell.UserAssist
+      WHERE LastExecuted > now() - (lookback_days * 86400)
+
+  - name: LNKFileArtifacts
+    query: |
+      SELECT *
+      FROM Artifact.Windows.Shell.LNK
+      WHERE AccessTime > now() - (lookback_days * 86400)
