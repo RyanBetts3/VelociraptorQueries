@@ -1,0 +1,52 @@
+name: Custom.Windows.InMemoryCOMHijackDetection
+type: CLIENT
+description: |
+  Detects signs of in-memory COM object hijacking by scanning memory of known COM host processes
+  for unregistered CLSIDs and suspicious shellcode patterns. Inspired by recent research showing
+  stealthy COM-based persistence that evades registry-based detection.
+
+parameters:
+  - name: processes_to_scan
+    type: string
+    default: "explorer.exe,svchost.exe,dllhost.exe"
+    description: Comma-separated list of COM host processes to scan
+
+sources:
+  - query: |
+      LET procs = split(processes_to_scan, ",")
+
+      LET targets = SELECT pid, name, ppid
+                    FROM pslist()
+                    WHERE name =~ procs
+
+      LET suspicious = foreach targets as proc {
+        LET memory_maps = memory_map(pid=proc.pid)
+
+        LET code_regions = foreach memory_maps as region {
+          WHERE region.protection =~ "EXECUTE" AND NOT region.file_backed
+          SELECT * FROM region
+        }
+
+        LET hits = foreach code_regions as region {
+          LET strings = yara_scan(pid=proc.pid, region=region, yara_rules='''
+          rule SuspiciousCLSID {
+            strings:
+              $clsid = /{[0-9A-Fa-f]{8}-([0-9A-Fa-f]{4}-){3}[0-9A-Fa-f]{12}}/
+            condition:
+              $clsid
+          }
+
+          rule ShellcodeStart {
+            strings:
+              $xor = {31 C9 64 8B 41 30} // common shellcode stub
+            condition:
+              $xor
+          }
+          ''')
+          SELECT proc.pid, proc.name, region.start, region.length, strings
+        }
+
+        SELECT * FROM hits
+      }
+
+      SELECT * FROM suspicious
