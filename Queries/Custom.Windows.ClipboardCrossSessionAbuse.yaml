@@ -1,0 +1,35 @@
+name: Custom.Windows.ClipboardCrossSessionAbuse
+type: CLIENT
+description: |
+  Detects clipboard abuse where data is copied across user sessions, potentially indicating stealthy lateral movement,
+  information leakage, or session hijacking techniques. Focuses on memory, session tokens, clipboard APIs, and unusual access.
+
+parameters:
+  - name: scan_clipboard_hosts
+    type: string
+    default: "mstsc.exe,conhost.exe,powershell.exe,explorer.exe,rdpclip.exe"
+    description: Comma-separated list of clipboard-capable binaries to inspect
+
+sources:
+  - query: |
+      LET targets = SELECT pid, name, sid, session_id
+                    FROM pslist()
+                    WHERE name =~ split(scan_clipboard_hosts, ",")
+
+      LET clipboard_access = foreach targets as proc {
+        LET handles = getsids(pid=proc.pid)
+        LET tokens = getsessiontokens(pid=proc.pid)
+        LET clipboard_calls = apihooks(pid=proc.pid, functions=["OpenClipboard", "GetClipboardData", "SetClipboardData", "CloseClipboard"])
+
+        SELECT proc.pid, proc.name, proc.session_id,
+               handles.sid AS sid,
+               tokens.session_token AS token,
+               clipboard_calls.function AS api_call,
+               clipboard_calls.callsite AS call_address
+      }
+
+      LET suspicious = SELECT * FROM clipboard_access
+                       WHERE session_id != extract_session_from_sid(sid)
+                         OR api_call =~ "SetClipboardData" AND name !~ "rdpclip.exe"
+
+      SELECT * FROM suspicious
