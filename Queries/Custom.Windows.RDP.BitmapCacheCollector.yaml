@@ -1,0 +1,28 @@
+name: Custom.Windows.RDP.BitmapCacheCollector
+type: CLIENT
+description: |
+  Collects all RDP Bitmap Cache files (*.bmc, *.bin, and related) from standard locations
+  on disk. These files can be reconstructed using RDP Cache Stitcher to visualize RDP sessions.
+
+parameters:
+  - name: output_zip
+    type: string
+    default: "RDP_BitmapCache.zip"
+    description: Name of the zip file to collect cache files into
+
+sources:
+  - query: |
+      LET cache_paths = [
+        expand_environment("%APPDATA%\\Microsoft\\Terminal Server Client\\Cache"),
+        "C:\\Users\\*\\AppData\\Local\\Microsoft\\Terminal Server Client\\Cache"
+      ]
+
+      LET files = foreach cache_paths as path {
+        glob(path=path + "\\*")
+        | WHERE Name =~ "\\.bmc$|\\.bin$|cache\\.*"
+        | SELECT Name, FullPath, Size, AccessTime, ModifyTime, CreateTime
+      }
+
+      LET download = SELECT FullPath FROM files
+
+      UPLOAD(files=download, zipname=output_zip)
