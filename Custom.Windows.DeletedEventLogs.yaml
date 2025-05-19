@@ -1,0 +1,20 @@
+name: Custom.Windows.DeletedEventLogAudit
+type: CLIENT
+description: |
+  Detects signs of cleared Windows Event Logs and deleted .evtx files.
+
+sources:
+  - query: |
+      LET cleared_events = SELECT * FROM artifact.Windows.EventLogs.Evtx
+        WHERE EventID = 1102
+
+      LET log_files = glob(globs=[
+        "C:\\Windows\\System32\\winevt\\Logs\\*.evtx"
+      ])
+      | SELECT Name, FullPath, Size, ModifyTime, AccessTime, CreateTime
+
+      LET deleted_logs = log_files
+        | WHERE Size == 0 OR ModifyTime > now() - 1d
+
+      SELECT * FROM cleared_events
+      UNION SELECT * FROM deleted_logs

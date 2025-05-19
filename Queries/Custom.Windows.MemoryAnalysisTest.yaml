@@ -1,0 +1,19 @@
+name: Custom.Windows.MemoryAnalysisLite
+type: CLIENT
+description: |
+  Gathers volatile memory-based forensic data without full memory imaging.
+  Extracts process list, loaded modules, and network connections.
+
+sources:
+  - query: |
+      LET procs = pslist()
+      LET dlls = foreach procs as p {
+        process_memory_maps(pid=p.Pid)
+        | SELECT pid, mapped_file, start, end
+      }
+
+      LET conns = netstat()
+
+      SELECT * FROM procs
+      UNION SELECT * FROM dlls
+      UNION SELECT * FROM conns
