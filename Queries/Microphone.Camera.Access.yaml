@@ -1,0 +1,27 @@
+-- Velociraptor VQL: Detect Unauthorized Use of Microphone or Camera Devices
+
+SELECT
+    device.Name AS DeviceName,
+    device.Description AS DeviceType,
+    device.Manufacturer AS Manufacturer,
+    driver.DriverName AS DriverName,
+    driver.InfName AS InfFile,
+    driver.IsSigned AS DriverSigned,
+    stat.filename AS DriverPath,
+    stat.atime AS LastAccessed,
+    ps.name AS AccessedBy,
+    CASE
+        WHEN hour(stat.atime) < 7 OR hour(stat.atime) > 19 THEN "Yes"
+        ELSE "No"
+    END AS AccessTimeSuspicious
+
+FROM Artifact.Windows.System.PnPDevices() AS device
+JOIN Artifact.Windows.System.Drivers() AS driver
+    ON device.Driver AS driver.DriverName
+JOIN glob(globs=["C:\\Windows\\System32\\drivers\\*.sys"]) AS stat
+    ON lower(driver.DriverName + ".sys") IN lower(stat.filename)
+LEFT JOIN pslist() AS ps
+    ON ps.pid = stat.inode_number
+
+WHERE lower(device.Description) =~ ".*(audio|sound|video|camera|usb).*"
+  AND device.Service != ""
