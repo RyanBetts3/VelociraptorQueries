@@ -1,0 +1,29 @@
+SELECT *,
+  hash(path=FullPath, hashselect="SHA256") AS SHA256,
+  Mtime,
+  Atime,
+  Ctime,
+  Size
+FROM glob(globs=[
+  "C:/Windows/System32/schtasks.exe",
+  "C:/Windows/System32/wbem/wmic.exe", 
+  "C:/Windows/System32/reg.exe",
+  "C:/Windows/System32/sc.exe",
+  "C:/Windows/System32/powershell.exe",
+  "C:/Windows/SysWOW64/powershell.exe"
+])
+WHERE 
+  -- Check for recently modified legitimate binaries (potential DLL hijacking)
+  Mtime > timestamp(epoch=now() - 2592000) -- 30 days
+  OR Size != dict(
+    "C:/Windows/System32/schtasks.exe": 279040,
+    "C:/Windows/System32/wbem/wmic.exe": 178688,
+    "C:/Windows/System32/reg.exe": 35328,
+    "C:/Windows/System32/sc.exe": 42496,
+    "C:/Windows/System32/powershell.exe": 497152,
+    "C:/Windows/SysWOW64/powershell.exe": 445952
+  )[FullPath]
+  -- Look for unsigned or suspicious signatures
+  OR NOT authenticode(filename=FullPath).Trusted
+  -- Hunt for binaries in wrong locations (masquerading)
+  OR FullPath =~ "(?i)(temp|appdata|programdata|users).*\\\\(schtasks|wmic|reg|sc|powershell)\\.exe$"
