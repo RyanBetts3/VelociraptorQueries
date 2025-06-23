@@ -1,0 +1,152 @@
+-- Quick Fix Attack Detection Query for Velociraptor
+-- This query detects suspicious rapid deployment activities and potential "quick fix" attack patterns
+
+-- Detect rapid file modifications and suspicious script executions
+SELECT * FROM foreach(
+  row={
+    SELECT Fqdn FROM info()
+  },
+  query={
+    SELECT 
+      Fqdn,
+      timestamp(epoch=Mtime) AS ModificationTime,
+      FullPath,
+      Size,
+      Mode,
+      Uid,
+      Gid,
+      hash(path=FullPath, hashselect="MD5") AS MD5Hash
+    FROM glob(globs=[
+      -- Common locations for quick deployment scripts
+      "/tmp/**/*.sh",
+      "/tmp/**/*.py", 
+      "/tmp/**/*.pl",
+      "/tmp/**/*.ps1",
+      "/var/tmp/**/*.sh",
+      "/var/tmp/**/*.py",
+      "/dev/shm/**/*",
+      -- Windows equivalent paths
+      "C:/Windows/Temp/**/*.bat",
+      "C:/Windows/Temp/**/*.ps1",
+      "C:/Windows/Temp/**/*.vbs",
+      "C:/Users/*/AppData/Local/Temp/**/*.exe",
+      "C:/Users/*/AppData/Local/Temp/**/*.ps1"
+    ])
+    WHERE 
+      -- Files modified in the last 24 hours
+      Mtime > now() - 86400
+      -- Executable permissions or script extensions
+      AND (Mode =~ "x" OR FullPath =~ "\\.(sh|py|pl|ps1|bat|vbs|exe)$")
+  }
+)
+
+UNION ALL
+
+-- Detect suspicious process executions (potential quick fix activities)
+SELECT * FROM foreach(
+  row={
+    SELECT Fqdn FROM info()
+  },
+  query={
+    SELECT 
+      Fqdn,
+      timestamp(epoch=CreateTime) AS ProcessStartTime,
+      Pid,
+      Ppid,
+      Name,
+      CommandLine,
+      Username,
+      Exe
+    FROM pslist()
+    WHERE 
+      -- Look for processes with suspicious patterns
+      (CommandLine =~ "(?i)(wget|curl|powershell|cmd).*http" 
+       OR CommandLine =~ "(?i)(nc|netcat|ncat).*-[el]" 
+       OR CommandLine =~ "(?i)python.*-c.*exec|eval" 
+       OR CommandLine =~ "(?i)bash.*-c.*\$\(" 
+       OR CommandLine =~ "(?i)(certutil|bitsadmin).*-transfer"
+       OR CommandLine =~ "(?i)mshta.*http"
+       OR CommandLine =~ "(?i)rundll32.*javascript"
+       OR CommandLine =~ "(?i)wmic.*process.*call.*create")
+      -- Recent processes (last 2 hours)
+      AND CreateTime > now() - 7200
+  }
+)
+
+UNION ALL
+
+-- Detect network connections from suspicious processes
+SELECT * FROM foreach(
+  row={
+    SELECT Fqdn FROM info()
+  },
+  query={
+    SELECT 
+      Fqdn,
+      timestamp(epoch=timestamp) AS ConnectionTime,
+      Laddr,
+      Raddr,
+      Pid,
+      Status,
+      Family,
+      Type
+    FROM netstat()
+    WHERE 
+      -- Outbound connections to non-standard ports
+      (Raddr.Port NOT IN (80, 443, 53, 22, 21, 25, 993, 995)
+       AND Family = "AF_INET"
+       AND Status = "ESTABLISHED")
+      -- Filter out common system processes
+      AND Pid NOT IN (
+        SELECT Pid FROM pslist() 
+        WHERE Name IN ("chrome", "firefox", "outlook", "teams", "slack")
+      )
+  }
+)
+
+UNION ALL
+
+-- Detect suspicious registry modifications (Windows)
+SELECT * FROM if(
+  condition=info().OS = "windows",
+  then={
+    SELECT 
+      info().Fqdn AS Fqdn,
+      timestamp(epoch=ModTime) AS RegistryModTime,
+      FullPath,
+      Type,
+      Data
+    FROM glob(globs=[
+      "HKEY_LOCAL_MACHINE/SOFTWARE/Microsoft/Windows/CurrentVersion/Run/**",
+      "HKEY_CURRENT_USER/SOFTWARE/Microsoft/Windows/CurrentVersion/Run/**",
+      "HKEY_LOCAL_MACHINE/SOFTWARE/Microsoft/Windows/CurrentVersion/RunOnce/**",
+      "HKEY_CURRENT_USER/SOFTWARE/Microsoft/Windows/CurrentVersion/RunOnce/**"
+    ])
+    WHERE ModTime > now() - 86400
+  }
+)
+
+UNION ALL
+
+-- Detect suspicious scheduled tasks/cron jobs
+SELECT * FROM if(
+  condition=info().OS != "windows",
+  then={
+    SELECT 
+      info().Fqdn AS Fqdn,
+      timestamp(epoch=Mtime) AS CronModTime,
+      FullPath,
+      Size,
+      read_file(filename=FullPath, length=1000) AS Content
+    FROM glob(globs=[
+      "/etc/cron*/**/*",
+      "/var/spool/cron/**/*",
+      "/etc/anacrontab",
+      "/etc/crontab"
+    ])
+    WHERE Mtime > now() - 86400
+  }
+)
+
+-- Order results by most recent activity
+ORDER BY 2 DESC;
