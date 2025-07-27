@@ -1,0 +1,89 @@
+-- Hunt for Security Tool Tampering via Registry and Services
+-- This query detects attempts to disable Windows Defender and other security tools
+
+SELECT * FROM chain(
+  -- Monitor Registry Changes to Windows Defender Settings
+  a={
+    SELECT 
+      timestamp(epoch=Mtime.Sec) AS EventTime,
+      "Registry Modification" AS EventType,
+      Key.OSPath AS RegistryPath,
+      Key.Name AS KeyName,
+      Key.Data.value AS Value,
+      "Windows Defender Tampering" AS Category
+    FROM glob(globs=[
+      "HKEY_LOCAL_MACHINE/SOFTWARE/Policies/Microsoft/Windows Defender/**",
+      "HKEY_LOCAL_MACHINE/SOFTWARE/Microsoft/Windows Defender/**"
+    ], accessor="registry")
+    WHERE Key.Name =~ "(?i)(DisableAntiSpyware|DisableAntiVirus|DisableRealtimeMonitoring|TamperProtection|DisableBehaviorMonitoring|DisableIOAVProtection|DisableOnAccessProtection|DisableRoutinelyTakingAction|DisableScanOnRealtimeEnable|DisableBlockAtFirstSeen)"
+  },
+  
+  -- Monitor Service Status Changes for Security Products
+  b={
+    SELECT 
+      now() AS EventTime,
+      "Service Status" AS EventType,
+      Name AS ServiceName,
+      State AS ServiceState,
+      StartType AS ServiceStartType,
+      "Security Service Monitoring" AS Category
+    FROM services()
+    WHERE Name =~ "(?i)(WinDefend|SecurityHealthService|Sense|MsMpSvc|NisSrv|wscsvc|WdNisSvc|WdBoot|WdFilter|mpssvc|BFE|SharedAccess|MpKslDrv|WdNisDrv)"
+    AND (State != "RUNNING" OR StartType = "DISABLED")
+  },
+  
+  -- Monitor Registry Changes for Other AV Products
+  c={
+    SELECT 
+      timestamp(epoch=Mtime.Sec) AS EventTime,
+      "Registry Modification" AS EventType,
+      Key.OSPath AS RegistryPath,
+      Key.Name AS KeyName,
+      Key.Data.value AS Value,
+      "Third-party AV Tampering" AS Category
+    FROM glob(globs=[
+      "HKEY_LOCAL_MACHINE/SOFTWARE/Policies/Symantec/**",
+      "HKEY_LOCAL_MACHINE/SOFTWARE/McAfee/**",
+      "HKEY_LOCAL_MACHINE/SOFTWARE/Trend Micro/**",
+      "HKEY_LOCAL_MACHINE/SOFTWARE/Kaspersky/**",
+      "HKEY_LOCAL_MACHINE/SOFTWARE/AVAST Software/**",
+      "HKEY_LOCAL_MACHINE/SOFTWARE/AVG/**",
+      "HKEY_LOCAL_MACHINE/SOFTWARE/Bitdefender/**",
+      "HKEY_LOCAL_MACHINE/SOFTWARE/ESET/**"
+    ], accessor="registry")
+    WHERE Key.Name =~ "(?i)(disable|off|tamper|protection)"
+  },
+  
+  -- Monitor Windows Security Center Settings
+  d={
+    SELECT 
+      timestamp(epoch=Mtime.Sec) AS EventTime,
+      "Registry Modification" AS EventType,
+      Key.OSPath AS RegistryPath,
+      Key.Name AS KeyName,
+      Key.Data.value AS Value,
+      "Security Center Tampering" AS Category
+    FROM glob(globs=[
+      "HKEY_LOCAL_MACHINE/SOFTWARE/Microsoft/Security Center/**",
+      "HKEY_LOCAL_MACHINE/SOFTWARE/Policies/Microsoft/Windows/Windows Security/**"
+    ], accessor="registry")
+    WHERE Key.Name =~ "(?i)(DisableNotifications|DisableEnhancedNotifications|UILockdown|HideWindowsSecurityNotificationArea)"
+  },
+  
+  -- Monitor UAC Registry Changes
+  e={
+    SELECT 
+      timestamp(epoch=Mtime.Sec) AS EventTime,
+      "Registry Modification" AS EventType,
+      Key.OSPath AS RegistryPath,
+      Key.Name AS KeyName,
+      Key.Data.value AS Value,
+      "UAC Tampering" AS Category
+    FROM glob(globs=[
+      "HKEY_LOCAL_MACHINE/SOFTWARE/Microsoft/Windows/CurrentVersion/Policies/System/**"
+    ], accessor="registry")
+    WHERE Key.Name =~ "(?i)(EnableLUA|ConsentPromptBehaviorAdmin|ConsentPromptBehaviorUser|PromptOnSecureDesktop)"
+    AND Key.Data.value = 0
+  }
+)
+ORDER BY EventTime DESC
